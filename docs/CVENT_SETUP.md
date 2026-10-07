@@ -102,6 +102,7 @@ Cvent sends back. You run it yourself, so the Client Secret stays on your comput
 | `npm run cvent:check` | The Client ID and Secret work; which region and scopes you have | No |
 | `npm run cvent:check -- --event <event ID>` | The site can read the event and its attendees, and which statuses they have | No |
 | `npm run cvent:check -- --event <event ID> --create-test-attendee you+test@yourdomain.ca` | Adds **one** test person and shows Cvent's full reply, including whether a **personal registration link** comes back | Yes: adds one person |
+| `npm run cvent:check -- --event <event ID> --attendee <attendee ID>` | Shows one attendee's full record, including any personal registration link | No |
 
 - [ ] Use a **test event** for the third command, never the live one, and remove the test
       person from the event in Cvent afterwards.

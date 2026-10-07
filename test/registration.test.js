@@ -24,7 +24,7 @@ function setup() {
 // Fake Cvent API: records created attendees and lets the test set their status.
 // By default it behaves like Cvent's create endpoints: takes a list, replies with a list.
 // With acceptList: false it only understands a single object, like the error seen in testing.
-function fakeCvent({ failCreate = false, acceptList = true, validStatus = 'No Response' } = {}) {
+function fakeCvent({ failCreate = false, acceptList = true, validStatus = 'No Response', idOnlyReply = false } = {}) {
   const attendees = [];
   const contacts = [];
   const bodies = [];
@@ -62,12 +62,18 @@ function fakeCvent({ failCreate = false, acceptList = true, validStatus = 'No Re
                     _links: { registration: { href: `https://cvent.example/reg?i=A${attendees.length + 1}` } },
                     answers: body.answers };
         attendees.push(a);
-        return reply(a);
+        // Real Cvent replies with only the new ID; the link is on the full record.
+        return reply(idOnlyReply ? { id: a.id } : a);
       }
     }
     if (u.pathname === '/ea/contacts') {
       const email = (u.searchParams.get('filter') || '').match(/email eq '(.*)'/)[1];
       return json({ data: contacts.filter((c) => c.email === email), paging: {} });
+    }
+    const one = u.pathname.match(/^\/ea\/attendees\/(.+)$/);
+    if (one) {
+      const a = attendees.find((x) => x.id === one[1]);
+      return a ? json(a) : json({ error: 'not found' }, 404);
     }
     if (u.pathname === '/ea/attendees') {
       const m = (u.searchParams.get('filter') || '').match(/contact\.id eq '(.*)'/);
@@ -305,4 +311,22 @@ test('someone already on the event is reused, not added twice', async () => {
   assert.equal(again.attendeeId, first.attendeeId);
   assert.equal(again.link, first.link);
   assert.equal(c.attendees.length, 1);
+});
+
+test('when Cvent replies with only an ID, the personal link is read from the full record', async () => {
+  const c = fakeCvent({ idOnlyReply: true });
+  const r = await c.client.createAttendee({ cvent_event_id: 'E' }, person(1), 'Local 1');
+  assert.equal(r.attendeeId, 'A1');
+  assert.equal(r.link, 'https://cvent.example/reg?i=A1');
+});
+
+test('cvent:check --attendee shows one attendee record and its link', async () => {
+  const { runCheck } = require('../src/cvent-check');
+  const c = fakeCvent();
+  await c.client.createAttendee({ cvent_event_id: 'E' }, person(1), 'Local 1');
+  const lines = [];
+  const report = await runCheck(c.client, { eventId: 'E', attendeeId: 'A1' }, (l) => lines.push(l));
+  const step = report.steps.find((s) => s.name === 'Read attendee A1');
+  assert.ok(step && step.ok);
+  assert.ok(lines.some((l) => l.includes('Personal registration link: https://cvent.example/reg?i=A1')));
 });

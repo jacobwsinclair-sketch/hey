@@ -4,6 +4,8 @@
 //   npm run cvent:check -- --event <cventEventId>        # + read the event and its attendees
 //   npm run cvent:check -- --event <id> --create-test-attendee you+test@example.com
 //                                                        # + add ONE test person to that event
+//   npm run cvent:check -- --event <id> --attendee <attendeeId>
+//                                                        # + show one attendee's full record
 //
 // It prints what Cvent returns and saves a report (no secrets in it) to data/cvent-check-*.json,
 // so the answers can be shared without sharing the Client Secret.
@@ -19,6 +21,7 @@ function parseArgs(argv) {
     if (a === '--event') args.eventId = argv[++i];
     else if (a === '--create-test-attendee') args.testEmail = argv[++i];
     else if (a === '--question') args.questionId = argv[++i];
+    else if (a === '--attendee') args.attendeeId = argv[++i];
     else if (a === '--help' || a === '-h') args.help = true;
     else throw new Error(`Unknown option: ${a}`);
   }
@@ -26,7 +29,7 @@ function parseArgs(argv) {
 }
 
 // Run each step, record what happened, and keep going where it makes sense.
-async function runCheck(client, { eventId, testEmail, questionId } = {}, log = console.log) {
+async function runCheck(client, { eventId, testEmail, questionId, attendeeId } = {}, log = console.log) {
   const report = { ranAt: new Date().toISOString(), apiBase: client.base, steps: [] };
   const step = async (name, fn) => {
     log(`\n▶ ${name}`);
@@ -74,6 +77,19 @@ async function runCheck(client, { eventId, testEmail, questionId } = {}, log = c
     // Field names only: the report must not carry real attendees' personal details.
     return { count: attendees.length, byStatus, attendeeFields: attendees[0] ? Object.keys(attendees[0]) : [] };
   });
+
+  if (attendeeId) {
+    await step(`Read attendee ${attendeeId}`, async () => {
+      const a = await client.getAttendee(attendeeId);
+      log(`  Status: ${a && a.status}`);
+      log(`  Personal registration link: ${findRegistrationLink(a) || 'NOT FOUND (ask Cvent which field holds it)'}`);
+      log(`  Fields on the record: ${Object.keys(a || {}).join(', ')}`);
+      log('  Full record from Cvent:');
+      log(JSON.stringify(a, null, 2).replace(/^/gm, '    '));
+      return a;
+    });
+    return report;
+  }
 
   if (!testEmail) {
     log('\nTo see what Cvent returns for a new person (including any personal registration link),');

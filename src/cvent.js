@@ -124,12 +124,33 @@ class CventClient {
         `event.id eq '${q(event.cvent_event_id)}' and contact.id eq '${q(contact.id)}'`, err);
     }
 
+    // Cvent's reply to "add attendee" may hold only the new ID; the full record may carry the
+    // personal registration link, so fetch it when the reply has none.
+    let full = created;
+    if (!findRegistrationLink(created)) {
+      try {
+        full = { ...created, ...(await this.getAttendee(created.id)) };
+      } catch {
+        // Not fatal: the redirect falls back to the event's template or registration URL.
+      }
+    }
+
     return {
       contactId: contact.id,
       attendeeId: created.id,
-      link: findRegistrationLink(created),
-      raw: { contact, attendee: created },
+      link: findRegistrationLink(full),
+      raw: { contact, attendee: full },
     };
+  }
+
+  // One attendee's full record.
+  async getAttendee(id) {
+    try {
+      return await this.request('GET', `/ea/attendees/${encodeURIComponent(id)}`);
+    } catch (err) {
+      if (err.status !== 404 && err.status !== 405) throw err;
+      return this.findOne('/ea/attendees', `id eq '${q(id)}'`, err);
+    }
   }
 
   // Most members are already in the Cvent address book from past events, and Cvent refuses a
