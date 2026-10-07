@@ -1,0 +1,157 @@
+const test = require('node:test');
+const assert = require('node:assert');
+const db = require('../src/db');
+const { CventClient, buildRedirectUrl } = require('../src/cvent');
+const { createApp } = require('../src/app');
+const { syncEvent } = require('../src/sync');
+
+const silent = { info() {}, error() {} };
+const person = (n) => ({ first_name: 'Pat', last_name: `Member${n}`, email: `pat${n}@example.com` });
+
+function setup() {
+  const store = db.open(':memory:');
+  const id = store.createEvent({
+    slug: 'convention', name: 'Convention', cvent_event_id: 'EVT-1',
+    cvent_registration_url: 'https://cvent.example/reg', hold_minutes: 30, is_open: 'on',
+  });
+  store.upsertLocal(id, 'Local 183', 2);
+  store.upsertLocal(id, 'Local 506', 1);
+  const event = store.getEvent(id);
+  const [l183, l506] = store.localsWithUsage(id);
+  return { store, event, l183, l506 };
+}
+
+// Fake Cvent API: records created attendees and lets the test set their status.
+function fakeCvent({ failCreate = false } = {}) {
+  const attendees = [];
+  const fetchImpl = async (url, opts) => {
+    const u = new URL(url);
+    const json = (body, status = 200) => ({ ok: status < 400, status, json: async () => body, text: async () => JSON.stringify(body) });
+    if (u.pathname === '/ea/oauth2/token') return json({ access_token: 't', expires_in: 3600 });
+    if (u.pathname === '/ea/contacts') return json({ id: `C${attendees.length + 1}` });
+    if (u.pathname === '/ea/attendees' && opts.method === 'POST') {
+      if (failCreate) return json({ message: 'boom' }, 500);
+      const body = JSON.parse(opts.body);
+      const a = { id: `A${attendees.length + 1}`, status: 'Invited', contact: { id: body.contact.id },
+                  registrationLink: `https://cvent.example/reg?i=A${attendees.length + 1}`, answers: body.answers };
+      attendees.push(a);
+      return json(a);
+    }
+    if (u.pathname === '/ea/attendees') return json({ data: attendees, paging: {} });
+    return json({}, 404);
+  };
+  return { client: new CventClient({ mode: 'api', clientId: 'id', clientSecret: 's', fetchImpl }), attendees };
+}
+
+async function withServer(app, fn) {
+  const server = app.listen(0);
+  await new Promise((r) => server.once('listening', r));
+  try { return await fn(`http://127.0.0.1:${server.address().port}`); } finally { server.close(); }
+}
+
+const post = (url, data, headers = {}) => fetch(url, {
+  method: 'POST', redirect: 'manual',
+  headers: { 'Content-Type': 'application/x-www-form-urlencoded', ...headers },
+  body: new URLSearchParams(data),
+});
+
+test('a Local cannot exceed its limit', () => {
+  const { store, event, l183 } = setup();
+  assert.ok(store.reserveSpot(event, l183.id, person(1)).registration);
+  assert.ok(store.reserveSpot(event, l183.id, person(2)).registration);
+  const third = store.reserveSpot(event, l183.id, person(3));
+  assert.match(third.error, /reached its limit of 2/);
+});
+
+test('same email does not take a second spot while the hold is live', () => {
+  const { store, event, l183 } = setup();
+  const first = store.reserveSpot(event, l183.id, person(1));
+  const again = store.reserveSpot(event, l183.id, { ...person(1), email: 'PAT1@example.com ' });
+  assert.equal(again.resumed, true);
+  assert.equal(again.registration.id, first.registration.id);
+  assert.equal(store.localsWithUsage(event.id)[0].held, 1);
+});
+
+test('confirmed email cannot register twice', () => {
+  const { store, event, l183 } = setup();
+  const { registration } = store.reserveSpot(event, l183.id, person(1));
+  store.setStatus(registration.id, 'confirmed');
+  assert.match(store.reserveSpot(event, l183.id, person(1)).error, /already registered/);
+});
+
+test('expired and cancelled holds free the spot', () => {
+  const { store, event, l506 } = setup();
+  const { registration } = store.reserveSpot(event, l506.id, person(1));
+  assert.ok(store.reserveSpot(event, l506.id, person(2)).error);
+  store.raw.prepare('UPDATE registrations SET expires_at = ? WHERE id = ?').run(Date.now() - 1, registration.id);
+  assert.equal(store.expireHolds(), 1);
+  const second = store.reserveSpot(event, l506.id, person(2));
+  assert.ok(second.registration);
+  store.release(second.registration.id);
+  assert.ok(store.reserveSpot(event, l506.id, person(3)).registration);
+});
+
+test('register -> Cvent attendee created -> redirected to Cvent -> sync confirms', async () => {
+  const { store, event, l183 } = setup();
+  store.updateEvent(event.id, { ...event, cvent_local_question_id: 'Q-LOCAL', is_open: 1 });
+  const cvent = fakeCvent();
+  const app = createApp({ db: store, cvent: cvent.client, adminPassword: 'pw', log: silent });
+
+  await withServer(app, async (base) => {
+    const res = await post(`${base}/e/convention`, { local_id: l183.id, ...person(1) });
+    assert.equal(res.status, 303);
+    assert.equal(res.headers.get('location'), 'https://cvent.example/reg?i=A1');
+  });
+
+  assert.deepEqual(cvent.attendees[0].answers, [{ question: { id: 'Q-LOCAL' }, value: ['Local 183'] }]);
+  const [reg] = store.listRegistrations(event.id);
+  assert.equal(reg.status, 'held');
+  assert.equal(reg.cvent_attendee_id, 'A1');
+
+  cvent.attendees[0].status = 'Accepted';
+  const { updated } = await syncEvent(store, cvent.client, store.getEvent(event.id));
+  assert.equal(updated, 1);
+  assert.equal(store.getRegistration(reg.id).status, 'confirmed');
+});
+
+test('a full Local is rejected and shown as full', async () => {
+  const { store, event, l506 } = setup();
+  const app = createApp({ db: store, cvent: new CventClient({ mode: 'off' }), adminPassword: 'pw', log: silent });
+  await withServer(app, async (base) => {
+    const ok = await post(`${base}/e/convention`, { local_id: l506.id, ...person(1) });
+    assert.equal(ok.status, 303);
+    assert.equal(ok.headers.get('location'), 'https://cvent.example/reg');
+    const full = await post(`${base}/e/convention`, { local_id: l506.id, ...person(2) });
+    assert.equal(full.status, 409);
+    assert.match(await full.text(), /Local 506 has reached its limit/);
+    const page = await (await fetch(`${base}/e/convention`)).text();
+    assert.match(page, /disabled>Local 506 — full/);
+  });
+});
+
+test('if Cvent fails the spot is released', async () => {
+  const { store, event, l506 } = setup();
+  const app = createApp({ db: store, cvent: fakeCvent({ failCreate: true }).client, adminPassword: 'pw', log: silent });
+  await withServer(app, async (base) => {
+    const res = await post(`${base}/e/convention`, { local_id: l506.id, ...person(1) });
+    assert.equal(res.status, 502);
+  });
+  assert.equal(store.localsWithUsage(event.id).find((l) => l.id === l506.id).remaining, 1);
+});
+
+test('admin requires the password', async () => {
+  const { store } = setup();
+  const app = createApp({ db: store, cvent: new CventClient(), adminPassword: 'pw', log: silent });
+  await withServer(app, async (base) => {
+    assert.equal((await fetch(`${base}/admin`)).status, 401);
+    const auth = { Authorization: 'Basic ' + Buffer.from('admin:pw').toString('base64') };
+    assert.equal((await fetch(`${base}/admin`, { headers: auth })).status, 200);
+  });
+});
+
+test('redirect template fills placeholders', () => {
+  const url = buildRedirectUrl(
+    { redirect_template: 'https://cvent.example/r?email={email}&local={local}', cvent_event_id: 'E' },
+    { email: 'a+b@x.com', first_name: 'A', last_name: 'B', token: 't' }, 'Local 1', {});
+  assert.equal(url, 'https://cvent.example/r?email=a%2Bb%40x.com&local=Local%201');
+});
