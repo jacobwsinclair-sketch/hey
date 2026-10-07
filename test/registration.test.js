@@ -149,6 +149,16 @@ test('admin requires the password', async () => {
   });
 });
 
+test('health check responds ok', async () => {
+  const { store } = setup();
+  const app = createApp({ db: store, cvent: new CventClient(), adminPassword: 'pw', log: silent });
+  await withServer(app, async (base) => {
+    const res = await fetch(`${base}/healthz`);
+    assert.equal(res.status, 200);
+    assert.equal(await res.text(), 'ok');
+  });
+});
+
 test('redirect template fills placeholders', () => {
   const url = buildRedirectUrl(
     { redirect_template: 'https://cvent.example/r?email={email}&local={local}', cvent_event_id: 'E' },

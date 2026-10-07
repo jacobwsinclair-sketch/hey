@@ -11,6 +11,12 @@ function createApp({ db, cvent, adminPassword, webhookSecret, log = console }) {
   app.use(express.urlencoded({ extended: false, limit: '50kb' }));
   app.use(express.static(path.join(__dirname, '..', 'public')));
 
+  // Health check for hosting platforms; also confirms the database is readable.
+  app.get('/healthz', (req, res) => {
+    db.raw.prepare('SELECT 1').get();
+    res.type('text/plain').send('ok');
+  });
+
   app.get('/', (req, res) => {
     const open = db.listEvents().filter((e) => e.is_open);
     res.send(views.layout('Event registration', `

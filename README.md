@@ -31,9 +31,10 @@ npm start                   # http://localhost:3000, admin at /admin
 npm test
 ```
 
-Data is stored in a SQLite file (`data/registrations.db` by default). Run it on any host that
-keeps a persistent disk (a small VM, Render/Railway/Fly with a volume, etc.) behind HTTPS, and
-back up the database file.
+Data is stored in a SQLite file (`data/registrations.db` by default).
+
+- **Deploying:** see [docs/DEPLOY.md](docs/DEPLOY.md) (Docker, Render, Fly.io, backups).
+- **Connecting Cvent:** see [docs/CVENT_SETUP.md](docs/CVENT_SETUP.md), a checklist for your Cvent admin.
 
 ## Setting up an event
 
@@ -121,6 +122,7 @@ src/routes/admin.js   admin screens (HTTP Basic auth via ADMIN_PASSWORD)
 src/db.js             SQLite schema and the capacity-checked reservation
 src/cvent.js          Cvent REST client and redirect URL builder
 src/sync.js           pull statuses from Cvent, expire holds
+src/backup.js         online database backup (npm run backup)
 src/views.js          HTML templates
 test/                 node:test suite (Cvent API is mocked)
 ```
