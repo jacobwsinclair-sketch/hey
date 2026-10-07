@@ -21,8 +21,13 @@ You need **Admin** rights in Cvent and **REST API** on your plan.
 
 **Set up a workspace** (it controls which data apps are allowed to use)
 - [ ] Create a **workspace** for this site, or use an existing one.
-- [ ] If you choose **Custom** scopes for the workspace, include at least the scopes in the
-      table below. Otherwise apps in the workspace can't be given them.
+- [ ] On **Choose permissions**, don't use **Select all**. Tick only:
+  - **Events**: covers every scope in the table below, since they all start with `event/`.
+  - **Webhook** (optional): only if you'll set up the webhook in step 5.
+
+  The workspace's permissions limit what its applications can be given, so the scopes in the
+  table must be included here. **Machine to Machine** doesn't appear on this screen; it comes
+  when you create the application.
 - [ ] On the **Developers** tab, click **+ Invite developer** and invite whoever will create the
       app. As the Cvent admin, you can invite yourself.
 
