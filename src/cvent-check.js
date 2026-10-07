@@ -87,12 +87,13 @@ async function runCheck(client, { eventId, testEmail, questionId } = {}, log = c
       { first_name: 'Test', last_name: 'Registration', email: testEmail, phone: null },
       'Local TEST',
     );
+    log(`  Body format Cvent accepted: ${JSON.stringify(client.bodyForms)}`);
     log(`  Contact ID: ${result.contactId}`);
     log(`  Attendee ID: ${result.attendeeId}`);
     log(`  Personal registration link: ${result.link || 'NOT FOUND in the response (ask Cvent which field holds it)'}`);
     log('  Full attendee response from Cvent:');
     log(JSON.stringify(result.raw.attendee, null, 2).replace(/^/gm, '    '));
-    return { ...result, linkFound: Boolean(findRegistrationLink(result.raw.attendee)) };
+    return { ...result, bodyForms: client.bodyForms, linkFound: Boolean(findRegistrationLink(result.raw.attendee)) };
   });
 
   log('\nRemember to remove the test person from the event in Cvent afterwards.');

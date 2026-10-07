@@ -22,25 +22,37 @@ function setup() {
 }
 
 // Fake Cvent API: records created attendees and lets the test set their status.
-function fakeCvent({ failCreate = false } = {}) {
+// By default it behaves like Cvent's create endpoints: takes a list, replies with a list.
+// With acceptList: false it only understands a single object, like the error seen in testing.
+function fakeCvent({ failCreate = false, acceptList = true } = {}) {
   const attendees = [];
+  const bodies = [];
   const fetchImpl = async (url, opts) => {
     const u = new URL(url);
     const json = (body, status = 200) => ({ ok: status < 400, status, json: async () => body, text: async () => JSON.stringify(body) });
     if (u.pathname === '/ea/oauth2/token') return json({ access_token: 't', expires_in: 3600 });
-    if (u.pathname === '/ea/contacts') return json({ id: `C${attendees.length + 1}` });
-    if (u.pathname === '/ea/attendees' && opts.method === 'POST') {
-      if (failCreate) return json({ message: 'boom' }, 500);
-      const body = JSON.parse(opts.body);
-      const a = { id: `A${attendees.length + 1}`, status: 'Invited', contact: { id: body.contact.id },
-                  registrationLink: `https://cvent.example/reg?i=A${attendees.length + 1}`, answers: body.answers };
-      attendees.push(a);
-      return json(a);
+    if (opts.method === 'POST') {
+      const raw = JSON.parse(opts.body);
+      bodies.push({ path: u.pathname, list: Array.isArray(raw) });
+      if (Array.isArray(raw) !== acceptList) {
+        return json({ error: { code: 'Bad Request', message: 'An error occurred while processing your request body. Please ensure that it is valid JSON' } }, 400);
+      }
+      const body = Array.isArray(raw) ? raw[0] : raw;
+      const reply = (rec) => json(Array.isArray(raw) ? [rec] : rec);
+      if (u.pathname === '/ea/contacts') return reply({ id: `C${attendees.length + 1}`, ...body });
+      if (u.pathname === '/ea/attendees') {
+        if (failCreate) return json({ message: 'boom' }, 500);
+        const a = { id: `A${attendees.length + 1}`, status: 'Invited', contact: { id: body.contact.id },
+                    _links: { registration: { href: `https://cvent.example/reg?i=A${attendees.length + 1}` } },
+                    answers: body.answers };
+        attendees.push(a);
+        return reply(a);
+      }
     }
     if (u.pathname === '/ea/attendees') return json({ data: attendees, paging: {} });
     return json({}, 404);
   };
-  return { client: new CventClient({ mode: 'api', clientId: 'id', clientSecret: 's', fetchImpl }), attendees };
+  return { client: new CventClient({ mode: 'api', clientId: 'id', clientSecret: 's', fetchImpl }), attendees, bodies };
 }
 
 async function withServer(app, fn) {
@@ -194,4 +206,30 @@ test('cvent:check stops cleanly when sign-in fails', async () => {
   assert.equal(report.steps.length, 1);
   assert.equal(report.steps[0].ok, false);
   assert.match(report.steps[0].error, /401/);
+});
+
+test('Cvent create calls send a list, and fall back to a single object if Cvent rejects the list', async () => {
+  const listCvent = fakeCvent();
+  const r1 = await listCvent.client.createAttendee({ cvent_event_id: 'E' }, person(1), 'Local 1');
+  assert.equal(r1.attendeeId, 'A1');
+  assert.equal(r1.link, 'https://cvent.example/reg?i=A1');
+  assert.deepEqual(listCvent.bodies.map((b) => b.list), [true, true]);
+
+  const objCvent = fakeCvent({ acceptList: false });
+  const r2 = await objCvent.client.createAttendee({ cvent_event_id: 'E' }, person(1), 'Local 1');
+  assert.equal(r2.contactId, 'C1');
+  assert.equal(r2.attendeeId, 'A1');
+  assert.deepEqual(objCvent.client.bodyForms, { '/ea/contacts': 'object', '/ea/attendees': 'object' });
+  // Second registration goes straight to the form that worked.
+  objCvent.bodies.length = 0;
+  await objCvent.client.createAttendee({ cvent_event_id: 'E' }, person(2), 'Local 1');
+  assert.deepEqual(objCvent.bodies.map((b) => b.list), [false, false]);
+});
+
+test('a Cvent reply without an ID is reported, not silently accepted', async () => {
+  const client = new CventClient({ mode: 'api', clientId: 'x', clientSecret: 'y', fetchImpl: async (url) => {
+    const body = new URL(url).pathname === '/ea/oauth2/token' ? { access_token: 't' } : [{ status: 'queued' }];
+    return { ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) };
+  } });
+  await assert.rejects(client.createOne('/ea/contacts', { email: 'a@b.c' }), /no ID was found in the reply/);
 });

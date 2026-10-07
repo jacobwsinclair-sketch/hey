@@ -68,14 +68,38 @@ class CventClient {
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     const text = await res.text();
-    if (!res.ok) throw new Error(`Cvent ${method} ${path} failed (${res.status}): ${text}`);
+    if (!res.ok) {
+      const err = new Error(`Cvent ${method} ${path} failed (${res.status}): ${text}`);
+      err.status = res.status;
+      err.body = text;
+      throw err;
+    }
     return text ? JSON.parse(text) : null;
+  }
+
+  // Cvent's create endpoints ("Create Contacts", etc.) generally take a list of records, even
+  // for one. Send a one-item list; if Cvent can't read that body, retry with a single object.
+  // Remembers which form worked per path (see bodyForms) so later calls go straight to it.
+  async createOne(path, item) {
+    this.bodyForms = this.bodyForms || {};
+    const form = this.bodyForms[path] || 'list';
+    try {
+      const created = unwrapCreated(await this.request('POST', path, form === 'list' ? [item] : item), path);
+      this.bodyForms[path] = form;
+      return created;
+    } catch (err) {
+      const unreadable = err.status === 400 && /request body|valid json|deserializ|cannot.*array/i.test(err.body || '');
+      if (this.bodyForms[path] || !unreadable) throw err;
+      const created = unwrapCreated(await this.request('POST', path, item), path);
+      this.bodyForms[path] = 'object';
+      return created;
+    }
   }
 
   // Create the person in Cvent as an invitee of the event, tagged with their Local, and
   // return what we need to send them on to Cvent's registration/payment pages.
   async createAttendee(event, reg, localName) {
-    const contact = await this.request('POST', '/ea/contacts', {
+    const contact = await this.createOne('/ea/contacts', {
       firstName: reg.first_name,
       lastName: reg.last_name,
       email: reg.email,
@@ -90,7 +114,7 @@ class CventClient {
     if (event.cvent_local_question_id) {
       attendee.answers = [{ question: { id: event.cvent_local_question_id }, value: [localName] }];
     }
-    const created = await this.request('POST', '/ea/attendees', attendee);
+    const created = await this.createOne('/ea/attendees', attendee);
 
     return {
       contactId: contact.id,
@@ -113,6 +137,19 @@ class CventClient {
     } while (token);
     return out;
   }
+}
+
+// Pull the created record out of Cvent's reply, whether it's the record itself, a list of
+// records, or the record wrapped in `data`.
+function unwrapCreated(reply, path) {
+  let r = reply;
+  if (Array.isArray(r)) r = r[0];
+  else if (r && Array.isArray(r.data)) r = r.data[0];
+  if (r && !r.id && r.data && typeof r.data === 'object' && !Array.isArray(r.data)) r = r.data;
+  if (!r || !r.id) {
+    throw new Error(`Cvent POST ${path} succeeded but no ID was found in the reply: ${JSON.stringify(reply)}`);
+  }
+  return r;
 }
 
 // Cvent can return a personalised registration link for an invitee; field names vary by API
