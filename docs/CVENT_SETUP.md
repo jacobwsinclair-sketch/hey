@@ -9,19 +9,56 @@ for the feature named in **bold**.
 - **No-API mode (`CVENT_MODE=off`)** works today. Attendees are sent to the event's normal
   registration link, and you confirm payments by hand in `/admin`. Skip to step 4.
 - **API mode (`CVENT_MODE=api`)** is fully automatic: the site creates each attendee in Cvent
-  and confirms them when they've paid. It needs Cvent **REST API** access, which depends on your
-  Cvent plan. Ask your Cvent account manager if you don't see it.
+  and confirms them when they've paid. It needs Cvent **REST API** access (see step 2).
 
 ## 2. Create API credentials (API mode)
 
-- [ ] In Cvent's **developer portal**, create an **API application** for this site.
-- [ ] Use the **client credentials** (server-to-server) grant type.
-- [ ] Grant read and write access to **attendees** and **contacts** (and **events** read, if
-      it's listed separately). Note the exact scope names Cvent shows.
-- [ ] Copy the **client ID** and **client secret** into the site's `CVENT_CLIENT_ID` and
-      `CVENT_CLIENT_SECRET` settings.
-- [ ] Set `CVENT_REGION` to `eu` if your account is hosted in Europe, otherwise `na`.
-- [ ] If Cvent requires scopes in the token request, set `CVENT_SCOPE` to them, space-separated.
+You need **Admin** rights in Cvent and **REST API** on your plan.
+
+**Open the developer portal**
+- [ ] In Cvent, go to **Admin** → **Integrations** → **REST API** and click **Manage API Access**.
+      The developer portal opens in a new tab.
+
+**Set up a workspace** (it controls which data apps are allowed to use)
+- [ ] Create a **workspace** for this site, or use an existing one.
+- [ ] On **Choose permissions**, don't use **Select all**. Tick only:
+  - **Events**: covers every scope in the table below, since they all start with `event/`.
+  - **Webhook** (optional): only if you'll set up the webhook in step 5.
+
+  The workspace's permissions limit what its applications can be given, so the scopes in the
+  table must be included here. **Machine to Machine** doesn't appear on this screen; it comes
+  when you create the application.
+- [ ] On the **Developers** tab, click **+ Invite developer** and invite whoever will create the
+      app. As the Cvent admin, you can invite yourself.
+
+**Create the application**
+- [ ] Go to **Applications** → **Create application**.
+- [ ] Choose **Machine to Machine** as the application type. This is the "client credentials"
+      sign-in the site uses; Cvent's screens don't use that name.
+- [ ] Name it, for example "Union Local registration".
+- [ ] Add these scopes:
+
+      | Scope | Why the site needs it |
+      |---|---|
+      | `event/contacts:write` | Create the person as a contact |
+      | `event/contacts:read` | Read the contact back |
+      | `event/attendees:write` | Add them to the event's invitation list, with their Union Local |
+      | `event/attendees:read` | Check who has registered and paid |
+      | `event/events:read` | Read the event (if Cvent lists it separately) |
+
+      If Cvent shows slightly different names, pick the read and write scopes for
+      **contacts** and **attendees**, and read for **events**.
+- [ ] Click **Save**.
+
+**Copy the credentials into the site**
+- [ ] On the application's page, click **Copy** next to the **Client ID** and put it in the
+      site's `CVENT_CLIENT_ID` setting.
+- [ ] Do the same for the **Client Secret** → `CVENT_CLIENT_SECRET`. Store it as a secret on
+      your host and don't share it.
+- [ ] Set `CVENT_REGION` to `eu` if your Cvent account is hosted in Europe, otherwise `na`.
+- [ ] Set `CVENT_MODE` to `api`.
+- [ ] Leave `CVENT_SCOPE` empty to start. If the site logs "Cvent auth failed" mentioning
+      scope, set it to the scopes above, separated by spaces.
 
 ## 3. Check the API calls against your account (API mode)
 
@@ -43,6 +80,36 @@ compare these against the API reference in your Cvent developer portal. All of t
       the README).
 - [ ] Attendee statuses: the site treats `Accepted` and `Attended` as paid, and `Cancelled` and
       `Declined` as cancelled. Confirm these match what Cvent reports after payment.
+
+### Run the connection test
+
+The site includes a command that tries these calls with your credentials and shows exactly what
+Cvent sends back. You run it yourself, so the Client Secret stays on your computer or server.
+
+**One-time setup on your computer** (skip if the site is already deployed; run it there instead):
+
+- [ ] Install **Node.js 20 or newer** from nodejs.org.
+- [ ] Download this repository (on GitHub: **Code → Download ZIP**, then unzip it) and open a
+      terminal in that folder.
+- [ ] Run `npm install`.
+- [ ] Copy `.env.example` to a new file called `.env`, and fill in `CVENT_CLIENT_ID`,
+      `CVENT_CLIENT_SECRET` and `CVENT_REGION`. `.env` is never uploaded to GitHub.
+
+**Run it in three stages:**
+
+| Command | What it checks | Changes anything in Cvent? |
+|---|---|---|
+| `npm run cvent:check` | The Client ID and Secret work; which region and scopes you have | No |
+| `npm run cvent:check -- --event <event ID>` | The site can read the event and its attendees, and which statuses they have | No |
+| `npm run cvent:check -- --event <event ID> --create-test-attendee you+test@yourdomain.ca` | Adds **one** test person and shows Cvent's full reply, including whether a **personal registration link** comes back | Yes: adds one person |
+
+- [ ] Use a **test event** for the third command, never the live one, and remove the test
+      person from the event in Cvent afterwards.
+- [ ] To also test the Union Local answer, add `--question <question ID>` to the third command.
+- [ ] Each run prints what it found and saves a report to `data/cvent-check-<date>.json`. The
+      report contains no secrets and only field names (not personal details) for existing
+      attendees, so it's safe to send to the developer or to Cvent support.
+- [ ] If a step fails, the message includes Cvent's own error text. That's the thing to show Cvent.
 
 ## 4. Configure the event in Cvent
 
