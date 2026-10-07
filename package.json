@@ -1,0 +1,30 @@
+{
+  "name": "union-local-registration",
+  "version": "1.0.0",
+  "description": "Registration site that enforces per-Union-Local attendee limits and hands off to Cvent for payment",
+  "main": "src/server.js",
+  "directories": {
+    "test": "test"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test test/*.test.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jacobwsinclair-sketch/hey.git"
+  },
+  "bugs": {
+    "url": "https://github.com/jacobwsinclair-sketch/hey/issues"
+  },
+  "homepage": "https://github.com/jacobwsinclair-sketch/hey#readme",
+  "dependencies": {
+    "better-sqlite3": "^13.0.3",
+    "dotenv": "^18.0.6",
+    "express": "^5.2.1"
+  },
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  }
+}
