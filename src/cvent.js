@@ -100,7 +100,7 @@ class CventClient {
   // Create the person in Cvent as an invitee of the event, tagged with their Local, and
   // return what we need to send them on to Cvent's registration/payment pages.
   async createAttendee(event, reg, localName) {
-    const contact = await this.createOne('/ea/contacts', {
+    const contact = await this.findOrCreateContact({
       firstName: reg.first_name,
       lastName: reg.last_name,
       email: reg.email,
@@ -114,7 +114,15 @@ class CventClient {
     if (event.cvent_local_question_id) {
       attendee.answers = [{ question: { id: event.cvent_local_question_id }, value: [localName] }];
     }
-    const created = await this.createInvitee(attendee);
+    let created;
+    try {
+      created = await this.createInvitee(attendee);
+    } catch (err) {
+      // Already on this event (e.g. they started before and came back): reuse that record.
+      if (!isDuplicate(err)) throw err;
+      created = await this.findOne('/ea/attendees',
+        `event.id eq '${q(event.cvent_event_id)}' and contact.id eq '${q(contact.id)}'`, err);
+    }
 
     return {
       contactId: contact.id,
@@ -122,6 +130,25 @@ class CventClient {
       link: findRegistrationLink(created),
       raw: { contact, attendee: created },
     };
+  }
+
+  // Most members are already in the Cvent address book from past events, and Cvent refuses a
+  // second contact with the same email. In that case, use the existing contact.
+  async findOrCreateContact(fields) {
+    try {
+      return await this.createOne('/ea/contacts', fields);
+    } catch (err) {
+      if (!isDuplicate(err)) throw err;
+      return this.findOne('/ea/contacts', `email eq '${q(fields.email)}'`, err);
+    }
+  }
+
+  // First record matching a filter, or rethrow `original` if there's none.
+  async findOne(path, filter, original) {
+    const page = await this.request('GET', `${path}?${new URLSearchParams({ filter, limit: '1' })}`);
+    const found = page && (Array.isArray(page) ? page[0] : page.data && page.data[0]);
+    if (!found || !found.id) throw original;
+    return found;
   }
 
   // Add the person to the event as an invitee who hasn't registered yet. Cvent calls that status
@@ -159,12 +186,25 @@ class CventClient {
   }
 }
 
+const isDuplicate = (err) => /duplicate|already exists/i.test(`${err.body || ''} ${err.message}`);
+// Quote a value inside a Cvent filter string.
+const q = (v) => String(v).replace(/'/g, "''");
+
 // Pull the created record out of Cvent's reply, whether it's the record itself, a list of
 // records, or the record wrapped in `data`.
+// List replies carry a status per record, so a 200 reply can still hold a failed record:
+// that is raised as an error with the record's own status and message.
 function unwrapCreated(reply, path) {
   let r = reply;
   if (Array.isArray(r)) r = r[0];
   else if (r && Array.isArray(r.data)) r = r.data[0];
+  if (r && typeof r.status === 'number' && r.status >= 400) {
+    const detail = (r.data && r.data.message) || r.message || 'unknown error';
+    const err = new Error(`Cvent POST ${path} failed (${r.status}): ${detail}`);
+    err.status = r.status;
+    err.body = JSON.stringify(r);
+    throw err;
+  }
   if (r && !r.id && r.data && typeof r.data === 'object' && !Array.isArray(r.data)) r = r.data;
   if (!r || !r.id) {
     throw new Error(`Cvent POST ${path} succeeded but no ID was found in the reply: ${JSON.stringify(reply)}`);

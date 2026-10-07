@@ -26,6 +26,7 @@ function setup() {
 // With acceptList: false it only understands a single object, like the error seen in testing.
 function fakeCvent({ failCreate = false, acceptList = true, validStatus = 'No Response' } = {}) {
   const attendees = [];
+  const contacts = [];
   const bodies = [];
   const fetchImpl = async (url, opts) => {
     const u = new URL(url);
@@ -39,23 +40,42 @@ function fakeCvent({ failCreate = false, acceptList = true, validStatus = 'No Re
       }
       const body = Array.isArray(raw) ? raw[0] : raw;
       const reply = (rec) => json(Array.isArray(raw) ? [rec] : rec);
-      if (u.pathname === '/ea/contacts') return reply({ id: `C${attendees.length + 1}`, ...body });
+      if (u.pathname === '/ea/contacts') {
+        if (contacts.some((c) => c.email === body.email)) {
+          // What Cvent actually returned for an existing email: a 200 list with a failed record.
+          return json([{ data: { code: 'Bad Request', message: 'Duplicate contact already exists', target: 'Contact' },
+                         status: 400, message: 'Something went wrong while processing the entity.' }]);
+        }
+        const c = { id: `C${contacts.length + 1}`, ...body };
+        contacts.push(c);
+        return reply(c);
+      }
       if (u.pathname === '/ea/attendees') {
         if (failCreate) return json({ message: 'boom' }, 500);
         if (body.status !== validStatus) {
           return json({ error: { code: 'Bad Request', message: `Invalid value: ${body.status}` } }, 400);
         }
-        const a = { id: `A${attendees.length + 1}`, status: 'Invited', contact: { id: body.contact.id },
+        if (attendees.some((x) => x.contact.id === body.contact.id && x.event === body.event.id)) {
+          return json([{ data: { message: 'Attendee already exists for this contact' }, status: 409, message: 'Duplicate' }]);
+        }
+        const a = { id: `A${attendees.length + 1}`, status: 'Invited', contact: { id: body.contact.id }, event: body.event.id,
                     _links: { registration: { href: `https://cvent.example/reg?i=A${attendees.length + 1}` } },
                     answers: body.answers };
         attendees.push(a);
         return reply(a);
       }
     }
-    if (u.pathname === '/ea/attendees') return json({ data: attendees, paging: {} });
+    if (u.pathname === '/ea/contacts') {
+      const email = (u.searchParams.get('filter') || '').match(/email eq '(.*)'/)[1];
+      return json({ data: contacts.filter((c) => c.email === email), paging: {} });
+    }
+    if (u.pathname === '/ea/attendees') {
+      const m = (u.searchParams.get('filter') || '').match(/contact\.id eq '(.*)'/);
+      return json({ data: m ? attendees.filter((a) => a.contact.id === m[1]) : attendees, paging: {} });
+    }
     return json({}, 404);
   };
-  return { client: new CventClient({ mode: 'api', clientId: 'id', clientSecret: 's', fetchImpl }), attendees, bodies };
+  return { client: new CventClient({ mode: 'api', clientId: 'id', clientSecret: 's', fetchImpl }), attendees, contacts, bodies };
 }
 
 async function withServer(app, fn) {
@@ -249,4 +269,40 @@ test('invitee status: uses "No Response", trying the other spelling if Cvent rej
 
   const c3 = fakeCvent({ validStatus: 'Something else' });
   await assert.rejects(c3.client.createAttendee({ cvent_event_id: 'E' }, person(1), 'Local 1'), /Invalid value: NoResponse/);
+});
+
+test('an email already in the Cvent address book reuses that contact', async () => {
+  const c = fakeCvent();
+  const first = await c.client.createAttendee({ cvent_event_id: 'E1' }, person(1), 'Local 1');
+  const again = await c.client.createAttendee({ cvent_event_id: 'E2' }, person(1), 'Local 1');
+  assert.equal(again.contactId, first.contactId);
+  assert.equal(c.contacts.length, 1);
+  assert.equal(c.attendees.length, 2);
+});
+
+test('a failed record inside a successful list reply is raised with its own message', () => {
+  const client = new CventClient({ mode: 'api', clientId: 'x', clientSecret: 'y', fetchImpl: async (url) => {
+    const body = new URL(url).pathname === '/ea/oauth2/token' ? { access_token: 't' }
+      : [{ data: { message: 'Email is required' }, status: 422, message: 'Something went wrong' }];
+    return { ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) };
+  } });
+  return assert.rejects(client.createOne('/ea/contacts', {}), /failed \(422\): Email is required/);
+});
+
+test('a successful record wrapped as {data, status} is unwrapped', async () => {
+  const client = new CventClient({ mode: 'api', clientId: 'x', clientSecret: 'y', fetchImpl: async (url) => {
+    const body = new URL(url).pathname === '/ea/oauth2/token' ? { access_token: 't' }
+      : [{ data: { id: 'C9', email: 'a@b.c' }, status: 201 }];
+    return { ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) };
+  } });
+  assert.equal((await client.createOne('/ea/contacts', { email: 'a@b.c' })).id, 'C9');
+});
+
+test('someone already on the event is reused, not added twice', async () => {
+  const c = fakeCvent();
+  const first = await c.client.createAttendee({ cvent_event_id: 'E1' }, person(1), 'Local 1');
+  const again = await c.client.createAttendee({ cvent_event_id: 'E1' }, person(1), 'Local 1');
+  assert.equal(again.attendeeId, first.attendeeId);
+  assert.equal(again.link, first.link);
+  assert.equal(c.attendees.length, 1);
 });
