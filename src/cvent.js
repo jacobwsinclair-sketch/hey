@@ -238,6 +238,8 @@ function unwrapCreated(reply, path) {
 function findRegistrationLink(attendee) {
   if (!attendee) return null;
   const candidates = [
+    // Confirmed against a live account: the attendee record's personal "register" link.
+    attendee.webLinks && attendee.webLinks.acceptRegistration,
     attendee.registrationLink,
     attendee.registrationUrl,
     attendee.links && attendee.links.registration && attendee.links.registration.href,

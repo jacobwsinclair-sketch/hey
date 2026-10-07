@@ -74,10 +74,12 @@ compare these against the API reference in your Cvent developer portal. All of t
 | Check who has paid | `GET /ea/attendees?filter=event.id eq '<id>'` |
 
 - [ ] Paths, field names and the paging format match your API version.
-- [ ] Find which field on a created attendee holds their **personalised registration link**.
-      The site looks for `registrationLink`, `registrationUrl` or `links.registration.href`. If
-      your API returns none of these, set a **Redirect template** on the event in `/admin` (see
-      the README).
+- [x] **Personal registration link:** confirmed on a live account. It's in the attendee
+      record's `webLinks.acceptRegistration` (for example `https://cvent.me/…?i=…`). Cvent's
+      reply to adding someone holds only their ID, so the site reads the full record to get it.
+- [x] **Adding people:** confirmed on a live account. Cvent takes a list of records, rejects a
+      second contact with the same email (the site reuses the existing one), and wants the
+      status `No Response` for someone invited but not yet registered.
 - [ ] Attendee statuses: the site treats `Accepted` and `Attended` as paid, and `Cancelled` and
       `Declined` as cancelled. Confirm these match what Cvent reports after payment.
 

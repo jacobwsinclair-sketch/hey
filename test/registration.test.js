@@ -330,3 +330,16 @@ test('cvent:check --attendee shows one attendee record and its link', async () =
   assert.ok(step && step.ok);
   assert.ok(lines.some((l) => l.includes('Personal registration link: https://cvent.example/reg?i=A1')));
 });
+
+test('the personal link is read from webLinks.acceptRegistration, as Cvent returns it', () => {
+  const { findRegistrationLink } = require('../src/cvent');
+  // Shape copied from a live Cvent attendee record.
+  const attendee = {
+    id: '82873f4c', status: 'No Response',
+    webLinks: {
+      acceptRegistration: 'https://cvent.me/dRXBq4?i=TD-abc',
+      declineRegistration: 'https://cvent.me/7Y0xRr?i=TD-abc',
+    },
+  };
+  assert.equal(findRegistrationLink(attendee), 'https://cvent.me/dRXBq4?i=TD-abc');
+});
