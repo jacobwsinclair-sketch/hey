@@ -343,3 +343,13 @@ test('the personal link is read from webLinks.acceptRegistration, as Cvent retur
   };
   assert.equal(findRegistrationLink(attendee), 'https://cvent.me/dRXBq4?i=TD-abc');
 });
+
+test('cvent:check times each step and prompts to open the new link straight away', async () => {
+  const { runCheck } = require('../src/cvent-check');
+  const c = fakeCvent({ idOnlyReply: true });
+  const lines = [];
+  const report = await runCheck(c.client, { eventId: 'E', testEmail: 't@example.com' }, (l) => lines.push(l));
+  assert.ok(report.steps.every((s) => typeof s.seconds === 'number'));
+  assert.ok(lines.some((l) => l.includes('OPEN IT NOW')));
+  assert.ok(lines.some((l) => l.includes('https://cvent.example/reg?i=A1')));
+});

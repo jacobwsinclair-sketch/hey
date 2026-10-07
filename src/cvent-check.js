@@ -33,14 +33,16 @@ async function runCheck(client, { eventId, testEmail, questionId, attendeeId } =
   const report = { ranAt: new Date().toISOString(), apiBase: client.base, steps: [] };
   const step = async (name, fn) => {
     log(`\n▶ ${name}`);
+    const started = Date.now();
+    const secs = () => ((Date.now() - started) / 1000).toFixed(1);
     try {
       const result = await fn();
-      report.steps.push({ name, ok: true, result });
-      log('  ✔ OK');
+      report.steps.push({ name, ok: true, seconds: Number(secs()), result });
+      log(`  ✔ OK (${secs()}s)`);
       return result;
     } catch (err) {
-      report.steps.push({ name, ok: false, error: err.message });
-      log(`  ✘ ${err.message}`);
+      report.steps.push({ name, ok: false, seconds: Number(secs()), error: err.message });
+      log(`  ✘ ${err.message} (${secs()}s)`);
       return undefined;
     }
   };
@@ -113,6 +115,13 @@ async function runCheck(client, { eventId, testEmail, questionId, attendeeId } =
     return { ...result, bodyForms: client.bodyForms, inviteeStatus: client.inviteeStatus, linkFound: Boolean(findRegistrationLink(result.raw.attendee)) };
   });
 
+  const added = report.steps[report.steps.length - 1];
+  if (added.ok && added.result.link) {
+    log(`\n⏱  A registrant would wait about ${added.seconds}s on our site for this step.`);
+    log(`   Link ready at ${new Date().toLocaleTimeString()}. OPEN IT NOW (private/incognito window) to check it works`);
+    log('   immediately, has the details filled in, and how close it gets to payment:');
+    log(`   ${added.result.link}`);
+  }
   log('\nRemember to remove the test person from the event in Cvent afterwards.');
   return report;
 }
