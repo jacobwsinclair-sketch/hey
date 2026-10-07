@@ -81,6 +81,36 @@ compare these against the API reference in your Cvent developer portal. All of t
 - [ ] Attendee statuses: the site treats `Accepted` and `Attended` as paid, and `Cancelled` and
       `Declined` as cancelled. Confirm these match what Cvent reports after payment.
 
+### Run the connection test
+
+The site includes a command that tries these calls with your credentials and shows exactly what
+Cvent sends back. You run it yourself, so the Client Secret stays on your computer or server.
+
+**One-time setup on your computer** (skip if the site is already deployed; run it there instead):
+
+- [ ] Install **Node.js 20 or newer** from nodejs.org.
+- [ ] Download this repository (on GitHub: **Code → Download ZIP**, then unzip it) and open a
+      terminal in that folder.
+- [ ] Run `npm install`.
+- [ ] Copy `.env.example` to a new file called `.env`, and fill in `CVENT_CLIENT_ID`,
+      `CVENT_CLIENT_SECRET` and `CVENT_REGION`. `.env` is never uploaded to GitHub.
+
+**Run it in three stages:**
+
+| Command | What it checks | Changes anything in Cvent? |
+|---|---|---|
+| `npm run cvent:check` | The Client ID and Secret work; which region and scopes you have | No |
+| `npm run cvent:check -- --event <event ID>` | The site can read the event and its attendees, and which statuses they have | No |
+| `npm run cvent:check -- --event <event ID> --create-test-attendee you+test@yourdomain.ca` | Adds **one** test person and shows Cvent's full reply, including whether a **personal registration link** comes back | Yes: adds one person |
+
+- [ ] Use a **test event** for the third command, never the live one, and remove the test
+      person from the event in Cvent afterwards.
+- [ ] To also test the Union Local answer, add `--question <question ID>` to the third command.
+- [ ] Each run prints what it found and saves a report to `data/cvent-check-<date>.json`. The
+      report contains no secrets and only field names (not personal details) for existing
+      attendees, so it's safe to send to the developer or to Cvent support.
+- [ ] If a step fails, the message includes Cvent's own error text. That's the thing to show Cvent.
+
 ## 4. Configure the event in Cvent
 
 - [ ] Set up registration types, fees and **payment** as usual. Payment stays entirely in Cvent.

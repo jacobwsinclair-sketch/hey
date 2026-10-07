@@ -123,6 +123,7 @@ src/db.js             SQLite schema and the capacity-checked reservation
 src/cvent.js          Cvent REST client and redirect URL builder
 src/sync.js           pull statuses from Cvent, expire holds
 src/backup.js         online database backup (npm run backup)
+src/cvent-check.js    Cvent connection test (npm run cvent:check)
 src/views.js          HTML templates
 test/                 node:test suite (Cvent API is mocked)
 ```

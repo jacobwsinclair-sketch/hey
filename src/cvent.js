@@ -52,6 +52,7 @@ class CventClient {
     if (!res.ok) throw new Error(`Cvent auth failed (${res.status}): ${await res.text()}`);
     const json = await res.json();
     this.token = json.access_token;
+    this.tokenInfo = { scope: json.scope, expiresIn: json.expires_in, tokenType: json.token_type };
     this.tokenExpires = Date.now() + (json.expires_in || 3600) * 1000;
     return this.token;
   }
@@ -91,7 +92,12 @@ class CventClient {
     }
     const created = await this.request('POST', '/ea/attendees', attendee);
 
-    return { contactId: contact.id, attendeeId: created.id, link: findRegistrationLink(created) };
+    return {
+      contactId: contact.id,
+      attendeeId: created.id,
+      link: findRegistrationLink(created),
+      raw: { contact, attendee: created },
+    };
   }
 
   // All attendees for an event (handles paging).

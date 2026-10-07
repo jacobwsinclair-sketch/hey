@@ -165,3 +165,33 @@ test('redirect template fills placeholders', () => {
     { email: 'a+b@x.com', first_name: 'A', last_name: 'B', token: 't' }, 'Local 1', {});
   assert.equal(url, 'https://cvent.example/r?email=a%2Bb%40x.com&local=Local%201');
 });
+
+test('cvent:check signs in, reads the event and reports the personal link', async () => {
+  const { runCheck } = require('../src/cvent-check');
+  const cvent = fakeCvent();
+  const base = cvent.client.fetch;
+  cvent.client.fetch = async (url, opts) => {
+    if (new URL(url).pathname === '/ea/events/EVT-1') {
+      return { ok: true, status: 200, text: async () => JSON.stringify({ id: 'EVT-1', title: 'Convention' }) };
+    }
+    return base(url, opts);
+  };
+  const lines = [];
+  const report = await runCheck(cvent.client, { eventId: 'EVT-1', testEmail: 't@example.com', questionId: 'Q1' },
+    (l) => lines.push(l));
+  assert.ok(report.steps.every((s) => s.ok), JSON.stringify(report.steps));
+  assert.equal(report.steps.length, 4);
+  assert.equal(report.steps[3].result.link, 'https://cvent.example/reg?i=A1');
+  assert.equal(JSON.stringify(report).includes('access_token'), false);
+  assert.ok(lines.some((l) => l.includes('Personal registration link: https://cvent.example/reg?i=A1')));
+});
+
+test('cvent:check stops cleanly when sign-in fails', async () => {
+  const { runCheck } = require('../src/cvent-check');
+  const client = new CventClient({ mode: 'api', clientId: 'x', clientSecret: 'y',
+    fetchImpl: async () => ({ ok: false, status: 401, text: async () => 'invalid_client' }) });
+  const report = await runCheck(client, { eventId: 'EVT-1' }, () => {});
+  assert.equal(report.steps.length, 1);
+  assert.equal(report.steps[0].ok, false);
+  assert.match(report.steps[0].error, /401/);
+});

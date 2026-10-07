@@ -9,7 +9,8 @@
   "scripts": {
     "start": "node src/server.js",
     "test": "node --test test/*.test.js",
-    "backup": "node src/backup.js"
+    "backup": "node src/backup.js",
+    "cvent:check": "node src/cvent-check.js"
   },
   "repository": {
     "type": "git",
