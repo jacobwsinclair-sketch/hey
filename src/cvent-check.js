@@ -88,12 +88,13 @@ async function runCheck(client, { eventId, testEmail, questionId } = {}, log = c
       'Local TEST',
     );
     log(`  Body format Cvent accepted: ${JSON.stringify(client.bodyForms)}`);
+    log(`  Invitee status Cvent accepted: "${client.inviteeStatus}"`);
     log(`  Contact ID: ${result.contactId}`);
     log(`  Attendee ID: ${result.attendeeId}`);
     log(`  Personal registration link: ${result.link || 'NOT FOUND in the response (ask Cvent which field holds it)'}`);
     log('  Full attendee response from Cvent:');
     log(JSON.stringify(result.raw.attendee, null, 2).replace(/^/gm, '    '));
-    return { ...result, bodyForms: client.bodyForms, linkFound: Boolean(findRegistrationLink(result.raw.attendee)) };
+    return { ...result, bodyForms: client.bodyForms, inviteeStatus: client.inviteeStatus, linkFound: Boolean(findRegistrationLink(result.raw.attendee)) };
   });
 
   log('\nRemember to remove the test person from the event in Cvent afterwards.');
@@ -114,7 +115,7 @@ async function main() {
   }
   const client = new CventClient({
     mode: 'api', region: env.CVENT_REGION, clientId: env.CVENT_CLIENT_ID,
-    clientSecret: env.CVENT_CLIENT_SECRET, scope: env.CVENT_SCOPE,
+    clientSecret: env.CVENT_CLIENT_SECRET, scope: env.CVENT_SCOPE, inviteeStatus: env.CVENT_INVITEE_STATUS,
   });
   const report = await runCheck(client, args);
 

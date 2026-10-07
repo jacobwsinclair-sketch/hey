@@ -22,6 +22,7 @@ const cvent = new CventClient({
   clientId: env.CVENT_CLIENT_ID,
   clientSecret: env.CVENT_CLIENT_SECRET,
   scope: env.CVENT_SCOPE,
+  inviteeStatus: env.CVENT_INVITEE_STATUS,
 });
 if (cvent.enabled && (!env.CVENT_CLIENT_ID || !env.CVENT_CLIENT_SECRET)) {
   console.error('CVENT_MODE=api requires CVENT_CLIENT_ID and CVENT_CLIENT_SECRET.');

@@ -22,12 +22,13 @@ const STATUS_MAP = {
 };
 
 class CventClient {
-  constructor({ mode, region, clientId, clientSecret, scope, fetchImpl } = {}) {
+  constructor({ mode, region, clientId, clientSecret, scope, inviteeStatus, fetchImpl } = {}) {
     this.mode = mode || 'off';
     this.base = BASE_URLS[region] || region || BASE_URLS.na;
     this.clientId = clientId;
     this.clientSecret = clientSecret;
     this.scope = scope;
+    this.inviteeStatus = inviteeStatus || null;
     this.fetch = fetchImpl || globalThis.fetch;
     this.token = null;
     this.tokenExpires = 0;
@@ -109,12 +110,11 @@ class CventClient {
     const attendee = {
       event: { id: event.cvent_event_id },
       contact: { id: contact.id },
-      status: 'Invited',
     };
     if (event.cvent_local_question_id) {
       attendee.answers = [{ question: { id: event.cvent_local_question_id }, value: [localName] }];
     }
-    const created = await this.createOne('/ea/attendees', attendee);
+    const created = await this.createInvitee(attendee);
 
     return {
       contactId: contact.id,
@@ -122,6 +122,26 @@ class CventClient {
       link: findRegistrationLink(created),
       raw: { contact, attendee: created },
     };
+  }
+
+  // Add the person to the event as an invitee who hasn't registered yet. Cvent calls that status
+  // "No Response" ("Invited" is rejected). The exact spelling the API wants isn't documented
+  // publicly, so try the likely spellings and remember the one Cvent accepts. Never let Cvent
+  // default the status: "Accepted" would count them as registered before they've paid.
+  async createInvitee(attendee) {
+    const candidates = this.inviteeStatus ? [this.inviteeStatus] : ['No Response', 'NoResponse'];
+    let lastErr;
+    for (const status of candidates) {
+      try {
+        const created = await this.createOne('/ea/attendees', { ...attendee, status });
+        this.inviteeStatus = status;
+        return created;
+      } catch (err) {
+        if (!(err.status === 400 && /invalid value/i.test(err.body || ''))) throw err;
+        lastErr = err;
+      }
+    }
+    throw lastErr;
   }
 
   // All attendees for an event (handles paging).

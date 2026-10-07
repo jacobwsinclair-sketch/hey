@@ -70,7 +70,7 @@ compare these against the API reference in your Cvent developer portal. All of t
 |---|---|
 | Get an access token | `POST /ea/oauth2/token` |
 | Create the person | `POST /ea/contacts` with first name, last name, email, phone |
-| Add them to the event | `POST /ea/attendees` with the event ID, contact ID, status `Invited` and the Union Local answer |
+| Add them to the event | `POST /ea/attendees` with the event ID, contact ID, status `No Response` (not yet registered) and the Union Local answer |
 | Check who has paid | `GET /ea/attendees?filter=event.id eq '<id>'` |
 
 - [ ] Paths, field names and the paging format match your API version.

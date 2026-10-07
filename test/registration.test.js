@@ -24,7 +24,7 @@ function setup() {
 // Fake Cvent API: records created attendees and lets the test set their status.
 // By default it behaves like Cvent's create endpoints: takes a list, replies with a list.
 // With acceptList: false it only understands a single object, like the error seen in testing.
-function fakeCvent({ failCreate = false, acceptList = true } = {}) {
+function fakeCvent({ failCreate = false, acceptList = true, validStatus = 'No Response' } = {}) {
   const attendees = [];
   const bodies = [];
   const fetchImpl = async (url, opts) => {
@@ -42,6 +42,9 @@ function fakeCvent({ failCreate = false, acceptList = true } = {}) {
       if (u.pathname === '/ea/contacts') return reply({ id: `C${attendees.length + 1}`, ...body });
       if (u.pathname === '/ea/attendees') {
         if (failCreate) return json({ message: 'boom' }, 500);
+        if (body.status !== validStatus) {
+          return json({ error: { code: 'Bad Request', message: `Invalid value: ${body.status}` } }, 400);
+        }
         const a = { id: `A${attendees.length + 1}`, status: 'Invited', contact: { id: body.contact.id },
                     _links: { registration: { href: `https://cvent.example/reg?i=A${attendees.length + 1}` } },
                     answers: body.answers };
@@ -232,4 +235,18 @@ test('a Cvent reply without an ID is reported, not silently accepted', async () 
     return { ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) };
   } });
   await assert.rejects(client.createOne('/ea/contacts', { email: 'a@b.c' }), /no ID was found in the reply/);
+});
+
+test('invitee status: uses "No Response", trying the other spelling if Cvent rejects it', async () => {
+  const c1 = fakeCvent();
+  await c1.client.createAttendee({ cvent_event_id: 'E' }, person(1), 'Local 1');
+  assert.equal(c1.client.inviteeStatus, 'No Response');
+
+  const c2 = fakeCvent({ validStatus: 'NoResponse' });
+  const r = await c2.client.createAttendee({ cvent_event_id: 'E' }, person(1), 'Local 1');
+  assert.equal(r.attendeeId, 'A1');
+  assert.equal(c2.client.inviteeStatus, 'NoResponse');
+
+  const c3 = fakeCvent({ validStatus: 'Something else' });
+  await assert.rejects(c3.client.createAttendee({ cvent_event_id: 'E' }, person(1), 'Local 1'), /Invalid value: NoResponse/);
 });
